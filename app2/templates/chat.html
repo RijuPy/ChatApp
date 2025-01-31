@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <!-- User List Section -->
+        <div class="col-md-4 border-end" style="height: 80vh; overflow-y: auto;">
+            <!-- Search Bar -->
+            <div class="row mb-3">
+                <div class="col-12">
+                    <form method="GET" action="#" class="d-flex">
+                        <input 
+                            type="text" 
+                            id="search-input"
+                            class="form-control me-2" 
+                            placeholder="Search users..."
+                            oninput="searchUsers()" 
+                        >
+                    </form>
+                </div>
+            </div>
+
+            <!-- User Cards -->
+            <div class="row" id="user-list">
+                <div class="col-12 text-center">
+                    <p>Loading users...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="col-md-8" id="chat-side" style="height: 80vh; overflow-y: auto; display: none;">
+            <div id="chat-area" class="p-3">
+
+                <h5 class="text-center text-muted">Load Chat</h5>
+                <!-- Chat messages will be dynamically added here -->
+            </div>
+            <div class="p-3 border-top">
+                <form id="chat-form" class="d-flex">
+                    <input 
+                        type="text" 
+                        id="chat-input" 
+                        class="form-control me-2" 
+                        placeholder="Type your message..." 
+                        disabled
+                    >
+                    <button type="submit" class="btn btn-primary" disabled>Send</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+
+    function formatTime(timestamp) {
+        if (!timestamp) return "00:00"; // Handle empty or invalid timestamp
+
+        const date = new Date(timestamp); // Convert timestamp to Date object
+        const hours = date.getHours().toString().padStart(2, "0"); // Get hours and pad with leading zero
+        const minutes = date.getMinutes().toString().padStart(2, "0"); // Get minutes and pad with leading zero
+
+        return `${hours}:${minutes}`; // Return formatted time
+    }
+
+    const username = "{{ request.user.username }}";
+    const user_id = "{{ request.user.id }}";
+    const userSocket = new WebSocket(
+        `ws://${window.location.host}/ws/chat_user_list/?user_id=${user_id}`
+    );
+
+    userSocket.onopen = function () {
+        console.log("WebSocket connection established.");
+    };
+
+    userSocket.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+        console.log("Received data from WebSocket:", data);
+
+        if (data.type === "user_list") {
+            updateUserList(data.users);
+        }
+    };
+
+    userSocket.onclose = function () {
+        console.log("WebSocket connection closed.");
+    };
+
+    function updateUserList(users) {
+        const userListContainer = document.getElementById("user-list");
+        userListContainer.innerHTML = ""; // Clear the current list
+
+        if (users.length === 0) {
+            userListContainer.innerHTML = `
+                <div class="col-12 text-center">
+                    <p>No users found.</p>
+                </div>
+            `;
+            return;
+        }
+
+        users.forEach(user => {
+            const userImage = user.profile_image || "https://www.pngitem.com/pimgs/m/551-5510463_default-user-image-png-transparent-png.png"; // Default image URL
+            const userCard = document.createElement("div");
+            
+            let date = "Chat";  // Default date
+            let time = "No";  // Default time
+
+            if (user.last_chat_time) {
+                const dateString = user.last_chat_time;
+                const dateObject = new Date(dateString);
+
+                // Check if the date is valid
+                if (!isNaN(dateObject.getTime())) {
+                    date = dateObject.toLocaleDateString();  // Date in local format
+                    time = dateObject.toLocaleTimeString();  // Time in local format
+                }
+            }
+
+            userCard.className = "col-12 mb-3 user-card"; // Full-width for left sidebar
+            userCard.innerHTML = `
+                <div class="card h-100">
+                    <div class="card-body d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center">
+                            <img 
+                                src="${userImage}" 
+                                alt="${user.first_name} ${user.last_name}" 
+                                class="rounded-circle me-3" 
+                                style="width: 40px; height: 40px; object-fit: cover;"
+                            >
+                            <div>
+                                <h6 class="card-title mb-0">${user.first_name} ${user.last_name} <i class="text-muted">${user.online_status}</i></h6>
+                                <small class="text-muted">${user.last_message || "No messages yet"}</small>
+                            </div>
+                        </div>
+                        <small class="text-muted">${time}, ${date}</small>
+                    </div>
+                </div>
+            `;
+            userCard.addEventListener("click", () => openChat(user));
+            userListContainer.appendChild(userCard);
+        });
+    }
+
+   
+    function searchUsers() {
+        const query = document.getElementById("search-input").value.toLowerCase();
+        const userCards = document.querySelectorAll("#user-list .user-card");
+
+        userCards.forEach(card => {
+            const username = card.querySelector(".card-title").textContent.toLowerCase();
+            if (username.includes(query)) {
+                card.style.display = "block";
+            } else {
+                card.style.display = "none";
+            }
+        });
+    }
+</script>
+
+<script>
+    let chatSocket = null;
+
+    function openChat(user) {
+        const chatInput = document.getElementById("chat-input");
+        const chatForm = document.getElementById("chat-form");
+        const chatArea = document.getElementById("chat-area");
+        const chatside = document.getElementById("chat-side");
+        const username = "{{ request.user.username }}"; // Current logged-in user's username
+        if (!chatInput || !chatForm || !chatArea) {
+            console.error("Chat elements are missing.");
+            return;
+        }
+        chatside.style.display = "block"
+        chatInput.disabled = false;
+        chatForm.querySelector("button").disabled = false;
+
+        const roomName = user.room_id; // Assuming user object contains `room_id`
+        const chatSocket = new WebSocket(`ws://${window.location.host}/ws/chat/${roomName}/`);
+
+        chatSocket.onmessage = function (event) {
+            const data = JSON.parse(event.data);
+            console.log("chat data", data);
+            const chatBox = document.getElementById("chat-area"); // Fixed to use "chat-area" as the container
+
+            chatBox.innerHTML += `
+                <div class="d-flex mb-3 ${data.username === username ? 'justify-content-end' : 'justify-content-start'}">
+                    <div class="message-box p-2" 
+                        style="max-width: 60%; 
+                                border-radius: 10px; 
+                                background-color: ${data.username === username ? '#d1e7dd' : '#f8d7da'};">
+                        <div class="small text-muted">
+                            <strong>${data.username}</strong>
+                            <span class="float-end">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <div class="mt-1">${data.message}</div>
+                    </div>
+                </div>`;
+
+            chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the latest message
+        };
+
+        chatSocket.onclose = function () {
+            console.log("Chat WebSocket closed.");
+        };
+
+        // Load chat history
+        loadChatHistory(roomName);
+
+        // Handle form submission
+        chatForm.onsubmit = function (e) {
+            e.preventDefault();
+            
+            const message = chatInput.value.trim();
+            if (message) {
+                chatSocket.send(JSON.stringify({
+                    message: message,
+                    username: "{{ request.user.username }}",
+                }));
+
+                // Save the message to the database
+                saveMessageToDB(roomName, message);
+                chatInput.value = ""; // Clear the input
+            }
+        };
+    }
+
+
+    function loadChatHistory(roomName) {
+        const chatArea = document.getElementById("chat-area");
+        if (!chatArea) {
+            console.error("Chat area element not found.");
+            return;
+        }
+
+        // Display a loading message while fetching the chat history
+        chatArea.innerHTML = `<p class="text-center text-muted">Loading chat history...</p>`;
+
+        // Fetch chat history from the server
+        fetch(`/chat/history/${roomName}/`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                chatArea.innerHTML = `
+                <p class="text-start text-muted"><b>${data.receiver_user}</b></p>
+                <hr>
+                `; // Clear the loading message
+
+                if (data.messages && data.messages.length > 0) {
+                    data.messages.forEach(msg => {
+                        const isCurrentUser = msg.username === "{{ request.user.username }}";
+                        const message = `
+                            <div class="d-flex mb-3 ${isCurrentUser ? 'justify-content-end' : 'justify-content-start'}">
+                                <div class="message-box p-2" 
+                                    style="max-width: 60%; 
+                                            border-radius: 10px; 
+                                            background-color: ${isCurrentUser ? '#d1e7dd' : '#f8d7da'};">
+                                    <div class="small text-muted">
+                                        <strong>${msg.username}</strong>
+                                        <span class="float-end">${formatTime(msg.timestamp)}</span>
+                                    </div>
+                                    <div class="mt-1">${msg.content}</div>
+                                </div>
+                            </div>
+                        `;
+
+                        chatArea.insertAdjacentHTML("beforeend", message);
+                    });
+
+                    // Auto-scroll to the bottom of the chat area
+                    chatArea.scrollTop = chatArea.scrollHeight;
+                } else {
+                    chatArea.innerHTML = `
+                    <p class="text-start text-muted"><b>${data.receiver_user}</b></p>
+                    <hr>
+                    <p class="text-center text-muted">No chat history available.</p>`;
+                }
+            })
+            .catch(error => {
+                console.error("Error loading chat history:", error);
+                chatArea.innerHTML = `<p class="text-center text-danger">Failed to load chat history. Please try again later.</p>`;
+            });
+    }
+
+    function saveMessageToDB(roomName, message) {
+        fetch("/chat/save_message/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": "{{ csrf_token }}",
+            },
+            body: JSON.stringify({
+                room_name: roomName,
+                message: message,
+            }),
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status !== "success") {
+                    console.error("Error saving message:", data.message);
+                }
+            })
+            .catch(error => console.error("Error saving message:", error));
+    }
+</script>
+
+
+{% endblock %}

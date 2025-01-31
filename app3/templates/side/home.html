@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+{{ request.user.username }}
+
+<script>
+    // Get the user ID from the backend context or set it explicitly
+    const userId = "{{ request.user.id }}";
+
+    // Establish the WebSocket connection with the user_id as a query parameter
+    const socket = new WebSocket(`ws://${window.location.host}/ws/chat/?user_id=${userId}`);
+    console.log("WebSocket connection established:", socket);
+
+    // Handle incoming messages from the WebSocket
+    socket.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "user_list") {
+            const userListContainer = document.getElementById('user-list');
+            userListContainer.innerHTML = ''; // Clear the existing list
+
+            // Populate the user list
+            data.users.forEach(user => {
+                const userElement = document.createElement('div');
+                userElement.textContent = `${user.username}`;
+                userListContainer.appendChild(userElement);
+            });
+        }
+    };
+
+    // Send a message to update the user list when the WebSocket connection opens
+    socket.onopen = function() {
+        console.log("WebSocket is open.");
+        socket.send(JSON.stringify({ action: "update_user_list" }));
+    };
+
+    // Handle WebSocket errors
+    socket.onerror = function(error) {
+        console.error("WebSocket error:", error);
+    };
+
+    // Handle WebSocket closure
+    socket.onclose = function(event) {
+        console.log("WebSocket is closed:", event);
+    };
+</script>
+
+<!-- Container for the user list -->
+<div id="user-list"></div>
+
+{% endblock %}

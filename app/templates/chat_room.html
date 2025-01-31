@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row align-items-center">
+        <div class="col-auto">
+            <!-- Default Image -->
+            <img 
+                src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTvDtoEwuV9E2kHqNDi6MnBzXlefn8TfyrwgQ&s" 
+                alt="Default Avatar" 
+                class="rounded-circle" 
+                style="width: 50px; height: 50px;">
+        </div>
+        <div class="col">
+            <!-- Static Username -->
+            <h4 class="mb-0">{{receiver_user}}</h4>
+        </div>
+        <div class="col-auto">
+            <!-- Three Dots with Options -->
+            <div class="dropdown">
+                <button 
+                    class="btn btn-secondary dropdown-toggle" 
+                    type="button" 
+                    id="dropdownMenuButton" 
+                    data-bs-toggle="dropdown" 
+                    aria-expanded="false"
+                    style="background: none; border: none; color: black;" >
+                    Action
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="dropdownMenuButton">
+                    <li><a class="dropdown-item" href="#">Option 1</a></li>
+                    <li><a class="dropdown-item" href="#">Option 2</a></li>
+                    <li><a class="dropdown-item" href="#">Option 3</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <hr>
+    <div class="row">
+        <div class="col-md-12">
+            <div id="chat-box" class="border p-3" style="height: 75vh; overflow-y: auto; background-color: #f8f9fa;">
+                {% for msg in messages %}
+                <div class="d-flex mb-3 {% if request.user.username == msg.sender.username %}justify-content-end{% else %}justify-content-start{% endif %}">
+                    <div class="message-box p-2" 
+                         style="max-width: 60%; 
+                                border-radius: 10px; 
+                                background-color: {% if request.user.username == msg.sender.username %}#d1e7dd{% else %}#f8d7da{% endif %};">
+                        <div class="small text-muted">
+                            <strong>{{ msg.sender.username }}</strong>
+                            <span class="float-end">{{ msg.timestamp|date:"H:i" }}</span>
+                        </div>
+                        <div class="mt-1">{{ msg.content }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="row mt-3">
+        <div class="col-md-12">
+            <form method="POST" id="message-form" class="d-flex">
+                {% csrf_token %}
+                <input 
+                    type="text" 
+                    id="message-input" 
+                    name="send_box"
+                    class="form-control me-2" 
+                    placeholder="Type your message here">
+                <button type="submit" class="btn btn-primary">Send</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<script>
+    const roomName = "{{ room_name }}"; // Passed from the Django view
+    const username = "{{ request.user.username }}"; // Current logged-in user's username
+
+    const chatSocket = new WebSocket(
+        `ws://${window.location.host}/ws/chat/${roomName}/`
+    );
+
+    // Handle incoming messages
+    chatSocket.onmessage = function (e) {
+        const data = JSON.parse(e.data);
+        const chatBox = document.getElementById("chat-box");
+
+        chatBox.innerHTML += `
+            <div class="d-flex mb-3 ${data.username === username ? 'justify-content-end' : 'justify-content-start'}">
+                <div class="message-box p-2" 
+                     style="max-width: 60%; 
+                            border-radius: 10px; 
+                            background-color: ${data.username === username ? '#d1e7dd' : '#f8d7da'};">
+                    <div class="small text-muted">
+                        <strong>${data.username}</strong>
+                        <span class="float-end">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <div class="mt-1">${data.message}</div>
+                </div>
+            </div>`;
+
+        chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the latest message
+    };
+
+    // Handle WebSocket closure
+    chatSocket.onclose = function (e) {
+        console.error("Chat socket closed unexpectedly");
+    };
+
+    // Handle message submission
+    document.getElementById("message-form").onsubmit = function (e) {
+        e.preventDefault();
+        const messageInput = document.getElementById("message-input");
+        const message = messageInput.value.trim();
+
+        if (message) {
+            // Send message through WebSocket
+            chatSocket.send(JSON.stringify({
+                "message": message,
+                "username": username,
+            }));
+
+            // Make an AJAX call to store the message in the database
+            fetch("{% url 'save_message' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": "{{ csrf_token }}",
+                },
+                body: JSON.stringify({
+                    "message": message,
+                    "room_name": roomName,
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log("Message saved:", data);
+            })
+            .catch(error => {
+                console.error("Error saving message:", error);
+            });
+
+            messageInput.value = ""; // Clear the input field
+        }
+    };
+</script>
+
+{% endblock %}
